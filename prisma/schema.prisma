@@ -1,0 +1,961 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// المجموعة A: المؤسسة والمستخدمون والصلاحيات
+// ==========================================
+
+model Company {
+  id              String       @id @default(uuid())
+  name            String
+  legalName       String?      @map("legal_name")
+  logoPath        String?      @map("logo_path")
+  address         String?
+  phone           String?
+  email           String?
+  defaultCurrency String       @default("SAR") @map("default_currency")
+  timezone        String       @default("Asia/Riyadh")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  departments     Department[]
+
+  @@map("companies")
+}
+
+model Department {
+  id               String            @id @default(uuid())
+  companyId        String            @map("company_id")
+  code             String            @unique
+  name             String
+  managerUserId    String?           @map("manager_user_id")
+  isActive         Boolean           @default(true) @map("is_active")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users            User[]
+  vehicles         Vehicle[]
+  drivers          Driver[]
+  budgets          Budget[]
+  purchaseRequests PurchaseRequest[]
+  expenses         Expense[]
+
+  @@map("departments")
+}
+
+model User {
+  id               String             @id @default(uuid())
+  username         String             @unique
+  fullName         String             @map("full_name")
+  email            String             @unique
+  passwordHash     String             @map("password_hash")
+  departmentId     String?            @map("department_id")
+  isActive         Boolean            @default(true) @map("is_active")
+  lastLoginAt      DateTime?          @map("last_login_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  department       Department?        @relation(fields: [departmentId], references: [id])
+  userRoles        UserRole[]
+  auditLogs        AuditLog[]
+  userNotifs       UserNotification[]
+
+  @@map("users")
+}
+
+model Role {
+  id              String           @id @default(uuid())
+  name            String           @unique
+  description     String?
+  isSystemRole    Boolean          @default(false) @map("is_system_role")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  module          String
+  action          String
+  description     String?
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId     String   @map("user_id")
+  roleId     String   @map("role_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  assignedBy String?  @map("assigned_by")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String?  @map("entity_id")
+  oldValuesJson String?  @map("old_values_json")
+  newValuesJson String?  @map("new_values_json")
+  ipAddress     String?  @map("ip_address")
+  requestId     String?  @map("request_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==========================================
+// المجموعة B: المركبات والسائقون
+// ==========================================
+
+model VehicleType {
+  id                  String                     @id @default(uuid())
+  name                String                     @unique
+  description         String?
+  brandModels         VehicleBrandModel[]
+  vehicles            Vehicle[]
+  maintenancePlans    MaintenancePlan[]
+  partCompatibilities PartVehicleCompatibility[]
+  lubricantSpecs      VehicleLubricantSpec[]
+
+  @@map("vehicle_types")
+}
+
+model VehicleBrandModel {
+  id                            String                     @id @default(uuid())
+  brand                         String
+  model                         String
+  vehicleTypeId                 String                     @map("vehicle_type_id")
+  fuelType                      String                     @default("DIESEL") @map("fuel_type")
+  manufacturerRecommendationsJson String?                  @map("manufacturer_recommendations_json")
+  vehicleType                   VehicleType                @relation(fields: [vehicleTypeId], references: [id])
+  vehicles                      Vehicle[]
+  partCompatibilities           PartVehicleCompatibility[]
+
+  @@unique([brand, model, vehicleTypeId])
+  @@map("vehicle_brands_models")
+}
+
+model Vehicle {
+  id                 String                   @id @default(uuid())
+  internalCode       String                   @unique @map("internal_code")
+  plateNumber        String                   @unique @map("plate_number")
+  chassisNumber      String                   @unique @map("chassis_number")
+  engineNumber       String?                  @map("engine_number")
+  vehicleTypeId      String                   @map("vehicle_type_id")
+  brandModelId       String                   @map("brand_model_id")
+  modelYear          Int                      @map("model_year")
+  purchaseDate       DateTime?                @map("purchase_date")
+  purchaseCost       Float                    @default(0) @map("purchase_cost")
+  currentOdometer    Float                    @default(0) @map("current_odometer")
+  odometerUpdatedAt  DateTime?                @map("odometer_updated_at")
+  fuelType           String                   @default("DIESEL") @map("fuel_type")
+  fuelTankCapacity   Float                    @default(100) @map("fuel_tank_capacity")
+  departmentId       String?                  @map("department_id")
+  assignedDriverId   String?                  @map("assigned_driver_id")
+  status             String                   @default("ACTIVE") // ACTIVE, MAINTENANCE, OUT_OF_SERVICE, ARCHIVED
+  ownershipType      String                   @default("OWNED")  // OWNED, LEASED, RENTED
+  notes              String?
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
+
+  vehicleType        VehicleType              @relation(fields: [vehicleTypeId], references: [id])
+  brandModel         VehicleBrandModel        @relation(fields: [brandModelId], references: [id])
+  department         Department?              @relation(fields: [departmentId], references: [id])
+  assignedDriver     Driver?                  @relation("AssignedDriver", fields: [assignedDriverId], references: [id])
+  odometerReadings   VehicleOdometerReading[]
+  maintenanceOrders  MaintenanceOrder[]
+  maintenanceSchedules MaintenanceSchedule[]
+  lubricantServices  LubricantService[]
+  fuelTransactions   FuelTransaction[]
+  fuelSummaries      FuelMonthlySummary[]
+  documents          VehicleDocument[]
+  expenses           Expense[]
+
+  @@index([status])
+  @@index([departmentId])
+  @@map("vehicles")
+}
+
+model Driver {
+  id                String       @id @default(uuid())
+  employeeCode      String       @unique @map("employee_code")
+  fullName          String       @map("full_name")
+  phone             String?
+  licenseNumber     String       @unique @map("license_number")
+  licenseExpiryDate DateTime     @map("license_expiry_date")
+  departmentId      String?      @map("department_id")
+  employmentStatus  String       @default("ACTIVE") @map("employment_status") // ACTIVE, ON_LEAVE, TERMINATED
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  department        Department?  @relation(fields: [departmentId], references: [id])
+  assignedVehicles  Vehicle[]    @relation("AssignedDriver")
+  fuelTransactions  FuelTransaction[]
+
+  @@map("drivers")
+}
+
+model VehicleOdometerReading {
+  id               String   @id @default(uuid())
+  vehicleId        String   @map("vehicle_id")
+  readingValue     Float    @map("reading_value")
+  readingDate      DateTime @default(now()) @map("reading_date")
+  sourceType       String   @default("MANUAL") @map("source_type") // MANUAL, MAINTENANCE, FUEL, LUBRICANT, GPS
+  sourceReferenceId String? @map("source_reference_id")
+  recordedBy       String?  @map("recorded_by")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  vehicle          Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, readingDate])
+  @@map("vehicle_odometer_readings")
+}
+
+// ==========================================
+// المجموعة C: الصيانة والأعطال والعمرات
+// ==========================================
+
+model MaintenancePlan {
+  id               String                 @id @default(uuid())
+  name             String
+  vehicleTypeId    String                 @map("vehicle_type_id")
+  intervalKm       Int                    @map("interval_km")
+  intervalDays     Int                    @map("interval_days")
+  description      String?
+  isActive         Boolean                @default(true) @map("is_active")
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
+  vehicleType      VehicleType            @relation(fields: [vehicleTypeId], references: [id])
+  items            MaintenancePlanItem[]
+  schedules        MaintenanceSchedule[]
+
+  @@map("maintenance_plans")
+}
+
+model MaintenancePlanItem {
+  id                   String                 @id @default(uuid())
+  maintenancePlanId    String                 @map("maintenance_plan_id")
+  taskName             String                 @map("task_name")
+  taskDescription      String?                @map("task_description")
+  estimatedDuration    Int                    @default(60) @map("estimated_duration") // Minutes
+  recommendedPartsJson String?                @map("recommended_parts_json")
+  maintenancePlan      MaintenancePlan        @relation(fields: [maintenancePlanId], references: [id], onDelete: Cascade)
+  orderTasks           MaintenanceOrderTask[]
+
+  @@map("maintenance_plan_items")
+}
+
+model MaintenanceOrder {
+  id                  String                    @id @default(uuid())
+  orderNumber         String                    @unique @map("order_number")
+  vehicleId           String                    @map("vehicle_id")
+  orderType           String                    @map("order_type") // PERIODIC, BREAKDOWN, ENGINE_OVERHAUL, GEARBOX_OVERHAUL, MAJOR_REPAIR, OIL_FILTER, TIRES_BATTERIES, INSPECTION
+  priority            String                    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  complaint           String?
+  diagnosis           String?
+  odometerReading     Float                     @map("odometer_reading")
+  openedAt            DateTime                  @default(now()) @map("opened_at")
+  plannedStartAt      DateTime?                 @map("planned_start_at")
+  actualStartAt       DateTime?                 @map("actual_start_at")
+  completedAt         DateTime?                 @map("completed_at")
+  workshopType        String                    @default("INTERNAL") @map("workshop_type") // INTERNAL, EXTERNAL
+  supplierId          String?                   @map("supplier_id")
+  assignedTo          String?                   @map("assigned_to")
+  status              String                    @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, IN_PROGRESS, WAITING_PARTS, COMPLETED, CANCELLED
+  laborCost           Float                     @default(0) @map("labor_cost")
+  externalServiceCost Float                     @default(0) @map("external_service_cost")
+  otherCost           Float                     @default(0) @map("other_cost")
+  warrantyUntil       DateTime?                 @map("warranty_until")
+  approvedBy          String?                   @map("approved_by")
+  approvedAt          DateTime?                 @map("approved_at")
+  notes               String?
+  createdBy           String?                   @map("created_by")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  vehicle             Vehicle                   @relation(fields: [vehicleId], references: [id])
+  supplier            Supplier?                 @relation(fields: [supplierId], references: [id])
+  tasks               MaintenanceOrderTask[]
+  parts               MaintenanceOrderPart[]
+  statusHistory       MaintenanceStatusHistory[]
+  lubricantServices   LubricantService[]
+
+  @@index([vehicleId])
+  @@index([status])
+  @@map("maintenance_orders")
+}
+
+model MaintenanceOrderTask {
+  id                    String               @id @default(uuid())
+  maintenanceOrderId    String               @map("maintenance_order_id")
+  maintenancePlanItemId String?              @map("maintenance_plan_item_id")
+  taskName              String               @map("task_name")
+  taskStatus            String               @default("PENDING") @map("task_status")
+  laborCost             Float                @default(0) @map("labor_cost")
+  notes                 String?
+  maintenanceOrder      MaintenanceOrder     @relation(fields: [maintenanceOrderId], references: [id], onDelete: Cascade)
+  planItem              MaintenancePlanItem? @relation(fields: [maintenancePlanItemId], references: [id])
+
+  @@map("maintenance_order_tasks")
+}
+
+model MaintenanceOrderPart {
+  id                 String           @id @default(uuid())
+  maintenanceOrderId String           @map("maintenance_order_id")
+  partId             String           @map("part_id")
+  warehouseId        String           @map("warehouse_id")
+  quantity           Float            @map("quantity")
+  unitCost           Float            @map("unit_cost")
+  stockIssueId       String?          @map("stock_issue_id")
+  notes              String?
+  maintenanceOrder   MaintenanceOrder @relation(fields: [maintenanceOrderId], references: [id], onDelete: Cascade)
+  part               Part             @relation(fields: [partId], references: [id])
+  warehouse          Warehouse        @relation(fields: [warehouseId], references: [id])
+
+  @@map("maintenance_order_parts")
+}
+
+model MaintenanceStatusHistory {
+  id                 String           @id @default(uuid())
+  maintenanceOrderId String           @map("maintenance_order_id")
+  oldStatus          String           @map("old_status")
+  newStatus          String           @map("new_status")
+  changedBy          String?          @map("changed_by")
+  changedAt          DateTime         @default(now()) @map("changed_at")
+  reason             String?
+  maintenanceOrder   MaintenanceOrder @relation(fields: [maintenanceOrderId], references: [id], onDelete: Cascade)
+
+  @@map("maintenance_status_history")
+}
+
+model MaintenanceSchedule {
+  id                  String          @id @default(uuid())
+  vehicleId           String          @map("vehicle_id")
+  maintenancePlanId   String          @map("maintenance_plan_id")
+  lastServiceDate     DateTime?       @map("last_service_date")
+  lastServiceOdometer Float?          @map("last_service_odometer")
+  nextDueDate         DateTime?       @map("next_due_date")
+  nextDueOdometer     Float?          @map("next_due_odometer")
+  status              String          @default("SCHEDULED") // SCHEDULED, DUE_SOON, OVERDUE, COMPLETED
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+  vehicle             Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  maintenancePlan     MaintenancePlan @relation(fields: [maintenancePlanId], references: [id])
+
+  @@index([status])
+  @@index([nextDueDate])
+  @@map("maintenance_schedule")
+}
+
+// ==========================================
+// المجموعة D: المخازن وقطع الغيار
+// ==========================================
+
+model Warehouse {
+  id            String                 @id @default(uuid())
+  code          String                 @unique
+  name          String
+  location      String?
+  managerUserId String?                @map("manager_user_id")
+  isActive      Boolean                @default(true) @map("is_active")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+  stockBalances StockBalance[]
+  movements     StockMovement[]
+  orderParts    MaintenanceOrderPart[]
+  goodsReceipts GoodsReceipt[]
+
+  @@map("warehouses")
+}
+
+model Part {
+  id                  String                     @id @default(uuid())
+  partCode            String                     @unique @map("part_code")
+  name                String
+  categoryId          String                     @map("category_id")
+  manufacturer        String?
+  partNumber          String?                    @map("part_number")
+  unitOfMeasure       String                     @default("PCS") @map("unit_of_measure")
+  minimumStock        Float                      @default(5) @map("minimum_stock")
+  isActive            Boolean                    @default(true) @map("is_active")
+  notes               String?
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+  category            PartCategory               @relation(fields: [categoryId], references: [id])
+  stockBalances       StockBalance[]
+  stockMovements      StockMovement[]
+  orderParts          MaintenanceOrderPart[]
+  compatibilities     PartVehicleCompatibility[]
+  purchaseReqItems    PurchaseRequestItem[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  goodsReceiptItems   GoodsReceiptItem[]
+  lubricantProduct    LubricantProduct?
+
+  @@index([partCode])
+  @@map("parts")
+}
+
+model PartCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  parts       Part[]
+
+  @@map("part_categories")
+}
+
+model PartVehicleCompatibility {
+  id            String             @id @default(uuid())
+  partId        String             @map("part_id")
+  vehicleTypeId String?            @map("vehicle_type_id")
+  brandModelId  String?            @map("brand_model_id")
+  notes         String?
+  part          Part               @relation(fields: [partId], references: [id], onDelete: Cascade)
+  vehicleType   VehicleType?       @relation(fields: [vehicleTypeId], references: [id])
+  brandModel    VehicleBrandModel? @relation(fields: [brandModelId], references: [id])
+
+  @@unique([partId, vehicleTypeId, brandModelId])
+  @@map("part_vehicle_compatibility")
+}
+
+model StockMovement {
+  id             String    @id @default(uuid())
+  movementNumber String    @unique @map("movement_number")
+  movementType   String    @map("movement_type") // RECEIPT, ISSUE, RETURN, TRANSFER, ADJUSTMENT, SCRAP
+  partId         String    @map("part_id")
+  warehouseId    String    @map("warehouse_id")
+  quantity       Float
+  unitCost       Float     @map("unit_cost")
+  referenceType  String?   @map("reference_type") // MAINTENANCE_ORDER, PURCHASE_ORDER, ADJUSTMENT_DOC
+  referenceId    String?   @map("reference_id")
+  movementDate   DateTime  @default(now()) @map("movement_date")
+  status         String    @default("CONFIRMED") // PENDING, CONFIRMED, REVERSED
+  createdBy      String?   @map("created_by")
+  approvedBy     String?   @map("approved_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  part           Part      @relation(fields: [partId], references: [id])
+  warehouse      Warehouse @relation(fields: [warehouseId], references: [id])
+
+  @@index([partId, warehouseId])
+  @@index([movementDate])
+  @@map("stock_movements")
+}
+
+model StockBalance {
+  partId           String    @map("part_id")
+  warehouseId      String    @map("warehouse_id")
+  quantityOnHand   Float     @default(0) @map("quantity_on_hand")
+  quantityReserved Float     @default(0) @map("quantity_reserved")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  part             Part      @relation(fields: [partId], references: [id], onDelete: Cascade)
+  warehouse        Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@id([partId, warehouseId])
+  @@map("stock_balances")
+}
+
+// ==========================================
+// المجموعة E: المشتريات والموردون
+// ==========================================
+
+model Supplier {
+  id              String            @id @default(uuid())
+  supplierCode    String            @unique @map("supplier_code")
+  name            String
+  taxNumber       String?           @map("tax_number")
+  phone           String?
+  email           String?
+  address         String?
+  paymentTerms    String?           @map("payment_terms")
+  isActive        Boolean           @default(true) @map("is_active")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  maintenanceOrders MaintenanceOrder[]
+  purchaseOrders  PurchaseOrder[]
+  invoices        SupplierInvoice[]
+  fuelTransactions FuelTransaction[]
+  expenses        Expense[]
+
+  @@map("suppliers")
+}
+
+model PurchaseRequest {
+  id             String                @id @default(uuid())
+  requestNumber  String                @unique @map("request_number")
+  requestedBy    String?               @map("requested_by")
+  departmentId   String?               @map("department_id")
+  requestDate    DateTime              @default(now()) @map("request_date")
+  status         String                @default("PENDING") // PENDING, APPROVED, REJECTED, ORDERED
+  justification  String?
+  approvedBy     String?               @map("approved_by")
+  approvedAt     DateTime?             @map("approved_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  department     Department?           @relation(fields: [departmentId], references: [id])
+  items          PurchaseRequestItem[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("purchase_requests")
+}
+
+model PurchaseRequestItem {
+  id                 String          @id @default(uuid())
+  purchaseRequestId  String          @map("purchase_request_id")
+  partId             String          @map("part_id")
+  quantity           Float
+  estimatedUnitPrice Float           @default(0) @map("estimated_unit_price")
+  purchaseRequest    PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  part               Part            @relation(fields: [partId], references: [id])
+
+  @@map("purchase_request_items")
+}
+
+model PurchaseOrder {
+  id                   String              @id @default(uuid())
+  poNumber             String              @unique @map("po_number")
+  supplierId           String              @map("supplier_id")
+  purchaseRequestId    String?             @map("purchase_request_id")
+  orderDate            DateTime            @default(now()) @map("order_date")
+  expectedDeliveryDate DateTime?           @map("expected_delivery_date")
+  subtotal             Float               @default(0)
+  discountAmount       Float               @default(0) @map("discount_amount")
+  taxAmount            Float               @default(0) @map("tax_amount")
+  totalAmount          Float               @default(0) @map("total_amount")
+  status               String              @default("ISSUED") // ISSUED, PARTIALLY_RECEIVED, COMPLETED, CANCELLED
+  createdBy            String?             @map("created_by")
+  approvedBy           String?             @map("approved_by")
+  approvedAt           DateTime?           @map("approved_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  supplier             Supplier            @relation(fields: [supplierId], references: [id])
+  purchaseRequest      PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id])
+  items                PurchaseOrderItem[]
+  goodsReceipts        GoodsReceipt[]
+  invoices             SupplierInvoice[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String        @map("purchase_order_id")
+  partId          String        @map("part_id")
+  quantity        Float
+  unitPrice       Float         @map("unit_price")
+  discountAmount  Float         @default(0) @map("discount_amount")
+  taxAmount       Float         @default(0) @map("tax_amount")
+  lineTotal       Float         @map("line_total")
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  part            Part          @relation(fields: [partId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+model GoodsReceipt {
+  id              String             @id @default(uuid())
+  receiptNumber   String             @unique @map("receipt_number")
+  purchaseOrderId String             @map("purchase_order_id")
+  warehouseId     String             @map("warehouse_id")
+  receiptDate     DateTime           @default(now()) @map("receipt_date")
+  status          String             @default("APPROVED") // PENDING, APPROVED, REJECTED
+  receivedBy      String?            @map("received_by")
+  approvedBy      String?            @map("approved_by")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
+  items           GoodsReceiptItem[]
+
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptItem {
+  id               String       @id @default(uuid())
+  goodsReceiptId   String       @map("goods_receipt_id")
+  partId           String       @map("part_id")
+  orderedQuantity  Float        @map("ordered_quantity")
+  receivedQuantity Float        @map("received_quantity")
+  rejectedQuantity Float        @default(0) @map("rejected_quantity")
+  unitCost         Float        @map("unit_cost")
+  goodsReceipt     GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  part             Part         @relation(fields: [partId], references: [id])
+
+  @@map("goods_receipt_items")
+}
+
+model SupplierInvoice {
+  id              String        @id @default(uuid())
+  supplierId      String        @map("supplier_id")
+  invoiceNumber   String        @map("invoice_number")
+  invoiceDate     DateTime      @map("invoice_date")
+  dueDate         DateTime?     @map("due_date")
+  purchaseOrderId String?       @map("purchase_order_id")
+  subtotal        Float         @default(0)
+  taxAmount       Float         @default(0) @map("tax_amount")
+  totalAmount     Float         @default(0) @map("total_amount")
+  paidAmount      Float         @default(0) @map("paid_amount")
+  status          String        @default("POSTED") // POSTED, PARTIALLY_PAID, PAID, CANCELLED
+  createdAt       DateTime      @default(now()) @map("created_at")
+  supplier        Supplier      @relation(fields: [supplierId], references: [id])
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
+  @@unique([supplierId, invoiceNumber])
+  @@map("supplier_invoices")
+}
+
+// ==========================================
+// المجموعة F: الزيوت والفلاتر
+// ==========================================
+
+model LubricantProduct {
+  id                  String                 @id @default(uuid())
+  productCode         String                 @unique @map("product_code")
+  name                String
+  lubricantType       String                 @map("lubricant_type") // ENGINE_OIL, GEAR_OIL, ATF, HYDRAULIC, COOLANT, BRAKE_FLUID, FILTER_OIL, FILTER_FUEL, FILTER_AIR, FILTER_HYDRAULIC
+  brand               String?
+  viscosityGrade      String?                @map("viscosity_grade") // e.g. 15W-40, 5W-30, 80W-90, 85W-140, ATF, etc.
+  specification       String?                // e.g. API CK-4/CI-4, ACEA E9, MB 228.31, OEM Specs
+  oilBase             String?                @default("MINERAL") @map("oil_base") // SYNTHETIC, SEMI_SYNTHETIC, MINERAL, NA
+  defaultIntervalKm   Int?                   @default(10000) @map("default_interval_km")
+  defaultIntervalDays Int?                   @default(90) @map("default_interval_days")
+  approxCost          Float?                 @default(0) @map("approx_cost")
+  unitOfMeasure       String                 @default("LITER") @map("unit_of_measure")
+  isActive            Boolean                @default(true) @map("is_active")
+  partId              String?                @unique @map("part_id")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  part                Part?                  @relation(fields: [partId], references: [id], onDelete: SetNull)
+  specs               VehicleLubricantSpec[]
+  serviceItems        LubricantServiceItem[]
+
+  @@map("lubricant_products")
+}
+
+model VehicleLubricantSpec {
+  id                 String           @id @default(uuid())
+  vehicleTypeId      String?          @map("vehicle_type_id")
+  lubricantProductId String           @map("lubricant_product_id")
+  systemName         String           @map("system_name") // ENGINE, TRANSMISSION, DIFFERENTIAL, HYDRAULIC, COOLING, FILTERS
+  requiredQuantity   Float            @map("required_quantity")
+  changeIntervalKm   Int              @map("change_interval_km")
+  changeIntervalDays Int              @map("change_interval_days")
+  notes              String?
+  lubricantProduct   LubricantProduct @relation(fields: [lubricantProductId], references: [id], onDelete: Cascade)
+  vehicleType        VehicleType?     @relation(fields: [vehicleTypeId], references: [id], onDelete: SetNull)
+
+  @@map("vehicle_lubricant_specs")
+}
+
+model LubricantService {
+  id                 String                 @id @default(uuid())
+  serviceNumber      String?                @map("service_number")
+  vehicleId          String                 @map("vehicle_id")
+  maintenanceOrderId String?                @map("maintenance_order_id")
+  serviceDate        DateTime               @default(now()) @map("service_date")
+  odometerReading    Float                  @map("odometer_reading")
+  nextDueDate        DateTime?              @map("next_due_date")
+  nextDueOdometer    Float?                 @map("next_due_odometer")
+  performedBy        String?                @map("performed_by")
+  totalCost          Float                  @default(0) @map("total_cost")
+  notes              String?
+  createdAt          DateTime               @default(now()) @map("created_at")
+  vehicle            Vehicle                @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  maintenanceOrder   MaintenanceOrder?      @relation(fields: [maintenanceOrderId], references: [id])
+  items              LubricantServiceItem[]
+
+  @@map("lubricant_services")
+}
+
+model LubricantServiceItem {
+  id                 String           @id @default(uuid())
+  lubricantServiceId String           @map("lubricant_service_id")
+  lubricantProductId String           @map("lubricant_product_id")
+  quantity           Float
+  unitCost           Float            @default(0) @map("unit_cost")
+  stockIssueId       String?          @map("stock_issue_id")
+  lubricantService   LubricantService @relation(fields: [lubricantServiceId], references: [id], onDelete: Cascade)
+  lubricantProduct   LubricantProduct @relation(fields: [lubricantProductId], references: [id])
+
+  @@map("lubricant_service_items")
+}
+
+// ==========================================
+// المجموعة G: الوقود
+// ==========================================
+
+model FuelTransaction {
+  id                String    @id @default(uuid())
+  transactionNumber String    @unique @map("transaction_number")
+  vehicleId         String    @map("vehicle_id")
+  transactionDate   DateTime  @default(now()) @map("transaction_date")
+  fuelType          String    @default("DIESEL") @map("fuel_type")
+  odometerReading   Float     @map("odometer_reading")
+  quantityLiters    Float     @map("quantity_liters")
+  unitPrice         Float     @map("unit_price")
+  totalAmount       Float     @map("total_amount")
+  supplierId        String?   @map("supplier_id")
+  stationName       String?   @map("station_name")
+  invoiceNumber     String?   @map("invoice_number")
+  driverId          String?   @map("driver_id")
+  paymentMethod     String    @default("CARD") @map("payment_method") // CARD, CASH, INVOICE
+  status            String    @default("APPROVED") // PENDING, APPROVED, REJECTED
+  createdBy         String?   @map("created_by")
+  approvedBy        String?   @map("approved_by")
+  notes             String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id])
+  supplier          Supplier? @relation(fields: [supplierId], references: [id])
+  driver            Driver?   @relation(fields: [driverId], references: [id])
+
+  @@index([vehicleId, transactionDate])
+  @@map("fuel_transactions")
+}
+
+model FuelMonthlySummary {
+  id                  String   @id @default(uuid())
+  vehicleId           String   @map("vehicle_id")
+  yearMonth           String   @map("year_month") // e.g. 2026-10
+  totalLiters         Float    @default(0) @map("total_liters")
+  totalCost           Float    @default(0) @map("total_cost")
+  distanceTraveled    Float    @default(0) @map("distance_traveled")
+  consumptionPer100km Float?   @map("consumption_per_100km")
+  costPerKm           Float?   @map("cost_per_km")
+  calculationStatus   String   @default("VALID") @map("calculation_status") // VALID, INSUFFICIENT_DATA, ODOMETER_ANOMALY
+  generatedAt         DateTime @default(now()) @map("generated_at")
+
+  vehicle             Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehicleId, yearMonth])
+  @@map("fuel_monthly_summaries")
+}
+
+// ==========================================
+// المجموعة H: التراخيص والمستندات
+// ==========================================
+
+model VehicleDocument {
+  id               String                   @id @default(uuid())
+  vehicleId        String                   @map("vehicle_id")
+  documentType     String                   @map("document_type") // REGISTRATION, INSURANCE, PERIODIC_INSPECTION, OPERATING_CARD
+  documentNumber   String                   @map("document_number")
+  issueDate        DateTime                 @map("issue_date")
+  expiryDate       DateTime                 @map("expiry_date")
+  issuingAuthority String?                  @map("issuing_authority")
+  attachmentPath   String?                  @map("attachment_path")
+  status           String                   @default("ACTIVE") // ACTIVE, EXPIRED, RENEWED
+  notes            String?
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  vehicle          Vehicle                  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  renewals         VehicleDocumentRenewal[]
+
+  @@index([expiryDate])
+  @@index([status])
+  @@map("vehicle_documents")
+}
+
+model VehicleDocumentRenewal {
+  id                 String          @id @default(uuid())
+  vehicleDocumentId  String          @map("vehicle_document_id")
+  renewalDate        DateTime        @default(now()) @map("renewal_date")
+  previousExpiryDate DateTime        @map("previous_expiry_date")
+  newExpiryDate      DateTime        @map("new_expiry_date")
+  fees               Float           @default(0)
+  insuranceCost      Float           @default(0) @map("insurance_cost")
+  inspectionCost     Float           @default(0) @map("inspection_cost")
+  receiptNumber      String?         @map("receipt_number")
+  status             String          @default("COMPLETED")
+  notes              String?
+  document           VehicleDocument @relation(fields: [vehicleDocumentId], references: [id], onDelete: Cascade)
+
+  @@map("vehicle_document_renewals")
+}
+
+// ==========================================
+// المجموعة I: المصروفات والميزانيات
+// ==========================================
+
+model ExpenseCategory {
+  id        String            @id @default(uuid())
+  code      String            @unique
+  name      String
+  parentId  String?           @map("parent_id")
+  isActive  Boolean           @default(true) @map("is_active")
+  createdAt DateTime          @default(now()) @map("created_at")
+  parent    ExpenseCategory?  @relation("ParentChild", fields: [parentId], references: [id])
+  children  ExpenseCategory[] @relation("ParentChild")
+  expenses  Expense[]
+  budgets   Budget[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id                String          @id @default(uuid())
+  expenseNumber     String          @unique @map("expense_number")
+  expenseDate       DateTime        @default(now()) @map("expense_date")
+  accountingDate    DateTime        @default(now()) @map("accounting_date")
+  vehicleId         String?         @map("vehicle_id")
+  departmentId      String?         @map("department_id")
+  expenseCategoryId String          @map("expense_category_id")
+  sourceType        String?         @map("source_type") // MAINTENANCE_ORDER, FUEL, DOCUMENT_RENEWAL, DIRECT_INVOICE
+  sourceId          String?         @map("source_id")
+  supplierId        String?         @map("supplier_id")
+  invoiceNumber     String?         @map("invoice_number")
+  description       String
+  subtotal          Float           @default(0)
+  discountAmount    Float           @default(0) @map("discount_amount")
+  taxAmount         Float           @default(0) @map("tax_amount")
+  totalAmount       Float           @default(0) @map("total_amount")
+  currency          String          @default("SAR")
+  paymentStatus     String          @default("UNPAID") @map("payment_status") // UNPAID, PARTIAL, PAID
+  createdBy         String?         @map("created_by")
+  approvedBy        String?         @map("approved_by")
+  approvedAt        DateTime?       @map("approved_at")
+  status            String          @default("APPROVED") // DRAFT, APPROVED, CANCELLED
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  vehicle           Vehicle?        @relation(fields: [vehicleId], references: [id])
+  department        Department?     @relation(fields: [departmentId], references: [id])
+  category          ExpenseCategory @relation(fields: [expenseCategoryId], references: [id])
+  supplier          Supplier?       @relation(fields: [supplierId], references: [id])
+  payments          ExpensePayment[]
+
+  // قيد فريد مركب يمنع تسجيل نفس المصدر التشغيلي مرتين في المصروفات
+  @@unique([sourceType, sourceId])
+  @@index([vehicleId])
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+model ExpensePayment {
+  id               String   @id @default(uuid())
+  expenseId        String   @map("expense_id")
+  paymentDate      DateTime @default(now()) @map("payment_date")
+  amount           Float
+  paymentMethod    String   @default("BANK_TRANSFER") @map("payment_method") // CASH, BANK_TRANSFER, CHEQUE, CARD
+  paymentReference String?  @map("payment_reference")
+  recordedBy       String?  @map("recorded_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  expense          Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@map("expense_payments")
+}
+
+model Budget {
+  id                String             @id @default(uuid())
+  name              String
+  fiscalYear        Int                @map("fiscal_year")
+  departmentId      String?            @map("department_id")
+  expenseCategoryId String?            @map("expense_category_id")
+  startDate         DateTime           @map("start_date")
+  endDate           DateTime           @map("end_date")
+  approvedAmount    Float              @map("approved_amount")
+  status            String             @default("ACTIVE") // ACTIVE, CLOSED
+  approvedBy        String?            @map("approved_by")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  department        Department?        @relation(fields: [departmentId], references: [id])
+  expenseCategory   ExpenseCategory?   @relation(fields: [expenseCategoryId], references: [id])
+  adjustments       BudgetAdjustment[]
+
+  @@map("budgets")
+}
+
+model BudgetAdjustment {
+  id               String    @id @default(uuid())
+  budgetId         String    @map("budget_id")
+  adjustmentAmount Float     @map("adjustment_amount")
+  reason           String
+  createdBy        String?   @map("created_by")
+  approvedBy       String?   @map("approved_by")
+  approvedAt       DateTime? @map("approved_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  budget           Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@map("budget_adjustments")
+}
+
+// ==========================================
+// المجموعة J: الإشعارات والمرفقات والإعدادات
+// ==========================================
+
+model Notification {
+  id               String             @id @default(uuid())
+  notificationType String             @map("notification_type") // MAINTENANCE_DUE, LICENSE_EXPIRY, LOW_STOCK, BUDGET_ALERT
+  entityType       String             @map("entity_type")
+  entityId         String?            @map("entity_id")
+  title            String
+  message          String
+  dueDate          DateTime?          @map("due_date")
+  severity         String             @default("INFO") // INFO, WARNING, CRITICAL
+  status           String             @default("ACTIVE") // ACTIVE, RESOLVED, DISMISSED
+  createdAt        DateTime           @default(now()) @map("created_at")
+  userNotifs       UserNotification[]
+
+  @@index([notificationType])
+  @@index([status])
+  @@map("notifications")
+}
+
+model UserNotification {
+  notificationId String       @map("notification_id")
+  userId         String       @map("user_id")
+  readAt         DateTime?    @map("read_at")
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, userId])
+  @@map("user_notifications")
+}
+
+model Attachment {
+  id               String   @id @default(uuid())
+  entityType       String   @map("entity_type") // VEHICLE, MAINTENANCE_ORDER, INVOICE, DOCUMENT
+  entityId         String   @map("entity_id")
+  originalFilename String   @map("original_filename")
+  storedFilename   String   @map("stored_filename")
+  storagePath      String   @map("storage_path")
+  mimeType         String   @map("mime_type")
+  fileSize         Int      @map("file_size")
+  uploadedBy       String?  @map("uploaded_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@map("attachments")
+}
+
+model SystemSetting {
+  id           String    @id @default(uuid())
+  settingKey   String    @unique @map("setting_key")
+  settingValue String    @map("setting_value")
+  updatedBy    String?   @map("updated_by")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
